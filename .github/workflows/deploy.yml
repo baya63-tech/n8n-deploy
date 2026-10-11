@@ -1,0 +1,43 @@
+name: Deploy n8n to AKS
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ACR_NAME: bayachacr
+  RESOURCE_GROUP: RG-BayaChaffai
+  AKS_CLUSTER: myAKSCluster
+  IMAGE_NAME: n8n
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image to ACR
+        run: |
+          az acr build --registry $ACR_NAME --image $IMAGE_NAME:${{ github.sha }} --image $IMAGE_NAME:latest .
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER --overwrite-existing
+
+      - name: Deploy to AKS
+        run: |
+          kubectl apply -f kubernetes/n8n-deployment.yml
+          kubectl set image deployment/n8n n8n=$ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
+          kubectl rollout status deployment/n8n
